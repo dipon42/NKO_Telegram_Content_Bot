@@ -1,0 +1,6 @@
+# Импорты репозиториев и инициализация Более удобные импорты в других модулях программы
+from database.repositories.access_link_repository import AccessLinksRepository
+from database.repositories.content_history_repository import ContentHistoryRepository
+from database.repositories.nko_repository import NKORepository
+from database.repositories.users_repository import UserRepository
+from database.repositories.ai_api_repository import AIAPIRepository

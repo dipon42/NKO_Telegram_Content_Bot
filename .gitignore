@@ -1,0 +1,6 @@
+.env
+nko_bot.db
+venv
+*.xml
+.idea
+__pycache__
