@@ -491,14 +491,14 @@ class GigaChatService:
                     return False, "Не удалось сгенерировать изображение. Попробуйте ещё раз!"
 
                 file_id = img_tag["src"]
-                image_response = giga.get_image(file_id)  # Асинхронное получение изображения
+                image_response = giga.get_image(file_id)
 
                 filename = f"temp/temp_image_{uuid.uuid4()}.png"
                 os.makedirs("temp", exist_ok=True)
 
                 # Декодируем и сохраняем файл в отдельном потоке, чтобы не блокировать ботаа
                 image_data = base64.b64decode(image_response.content)
-                await asyncio.to_thread(self._save_image, filename, image_data)
+                await asyncio.to_thread(self._save_image, filename, image_data) # создаем файл асинхронно
 
                 logger.info(f"Изображение успешно сохранено: {filename}")
                 return True, filename
