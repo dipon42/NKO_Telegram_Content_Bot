@@ -461,16 +461,15 @@ class GigaChatService:
 
     async def generate_image(self, prompt: str, style: Optional[str],
                              credentials: Optional[str] = None) -> tuple[bool, str]:
-        """Генерация изображения на основе промпта"""
+        """Асинхронная генерация изображения на основе промпта"""
         used_credentials = credentials if credentials else self.credentials
         async with GigaChat(
                 credentials=used_credentials,
                 verify_ssl_certs=False,
-                timeout=80.0
+                timeout=80.0,
         ) as giga:
 
             style = style if style else "реализм"
-
             generate_prompt = f"Нарисуй изображение подходящее под текст '{prompt}' в стиле '{style}'"
 
             payload = Chat(
@@ -481,7 +480,8 @@ class GigaChatService:
             )
 
             try:
-                response = giga.chat(payload)
+                # Асинхронный вызов
+                response = await giga.achat(payload)
                 message_content = response.choices[0].message.content
 
                 soup = BeautifulSoup(message_content, "html.parser")
@@ -491,13 +491,14 @@ class GigaChatService:
                     return False, "Не удалось сгенерировать изображение. Попробуйте ещё раз!"
 
                 file_id = img_tag["src"]
-                image_response = giga.get_image(file_id)  #
+                image_response = giga.get_image(file_id)  # Асинхронное получение изображения
 
                 filename = f"temp/temp_image_{uuid.uuid4()}.png"
-                os.makedirs("temp", exist_ok=True)  # создаем папку, если ее нет для временных файлов
+                os.makedirs("temp", exist_ok=True)
 
-                with open(filename, mode="wb") as fd:
-                    fd.write(base64.b64decode(image_response.content))
+                # Декодируем и сохраняем файл в отдельном потоке, чтобы не блокировать ботаа
+                image_data = base64.b64decode(image_response.content)
+                await asyncio.to_thread(self._save_image, filename, image_data)
 
                 logger.info(f"Изображение успешно сохранено: {filename}")
                 return True, filename
@@ -505,6 +506,12 @@ class GigaChatService:
             except Exception as e:
                 logger.exception("Ошибка при генерации изображения: %s", e)
                 return False, "Не удалось сгенерировать изображение. Попробуйте ещё раз!"
+
+    @staticmethod
+    def _save_image(filename: str, data: bytes):
+        """сохранение файла — вынесена для безопасного вызова в потоке"""
+        with open(filename, mode="wb") as fd:
+            fd.write(data)
 
 # Глобальный экземпляр
 _gigachat_service: Optional[GigaChatService] = None
