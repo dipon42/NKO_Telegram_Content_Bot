@@ -1,0 +1,6 @@
+sqlalchemy
+aiosqlite
+cryptography
+gigachat
+python-doten
+beautifulsoup4
