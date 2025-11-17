@@ -1,6 +1,7 @@
 sqlalchemy
 aiosqlite
+aiogram
 cryptography
 gigachat
-python-doten
+python-dotenv
 beautifulsoup4
