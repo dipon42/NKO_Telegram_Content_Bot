@@ -1,0 +1,9 @@
+sqlalchemy
+aiosqlite
+aiogram
+cryptography
+gigachat
+python-dotenv
+beautifulsoup4
+httpx
+apscheduler
