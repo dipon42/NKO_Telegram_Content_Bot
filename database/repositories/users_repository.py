@@ -5,6 +5,7 @@ from sqlalchemy import update, not_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from config import config
 from database.models import UserModel
 
 
@@ -33,11 +34,39 @@ class UserRepository:
             return user  # Возвращаем существующего
 
         # Создаём нового пользователя
-        new_user = UserModel(tg_id=tg_id)
+        role = "admin" if tg_id in config.ADMIN_IDS else "guest"
+        new_user = UserModel(
+            tg_id=tg_id,
+            role=role,
+            access=role == "admin"
+        )
         self.db_session.add(new_user)
         await self.db_session.commit()
         await self.db_session.refresh(new_user)
         return new_user
+
+    async def set_access_and_role(
+        self,
+        tg_id: int,
+        access: bool,
+        role: str | None = None,
+        invited_link_id: int | None = None,
+    ) -> UserModel:
+        values: dict = {"access": access}
+        if role is not None:
+            values["role"] = role
+        if invited_link_id is not None:
+            values["invited_by_link_id"] = invited_link_id
+
+        result = await self.db_session.execute(
+            update(UserModel)
+            .where(UserModel.tg_id == tg_id)
+            .values(**values)
+            .returning(UserModel)
+        )
+        user = result.scalar_one()
+        await self.db_session.commit()
+        return user
 
     async def _update_access(self, tg_id: int, new_access: bool) -> bool:
         """Обновляет статус доступа и возвращает новое значение"""

@@ -4,4 +4,5 @@ from handlers.nko_add_handlers import fsm_router
 from handlers.error_handler import errors_router
 from handlers.settings_handlers import settings_router
 from handlers.history_handler import history_router
+from handlers.access_links_handler import access_router
 

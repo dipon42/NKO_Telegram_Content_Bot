@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from fsm import ContentPlanState
 from keyboards.inline_keyboards import get_regenerate_keyboard, content_plan_type_keyboard, get_accept_plan_keyboard, \
     nko_add_info_keyboard
+from utils.generation_queue import get_generation_queue
 
 cp_router = Router(name="AI Content Plan Router")
 
@@ -77,14 +78,13 @@ async def plan_from_data_selected(cb: CallbackQuery, state: FSMContext, nko_repo
 
     if nko_data and nko_data.name:
         # Проверяем размер очереди перед генерацией
-        from utils.generation_queue import get_generation_queue
-        queue = get_generation_queue()
-        queue_size = queue._queue.qsize()
+        queue = get_generation_queue(user_api_key)
+        pending_tasks = queue.get_pending_tasks_count()
         
         # Показываем статус генерации ПЕРЕД началом генерации
-        if queue_size > 0:
+        if pending_tasks > 0:
             msg = await cb.message.edit_text(
-                f"⏳ Ваш запрос поставлен в очередь (позиция: {queue_size + 1}). "
+                f"⏳ Ваш запрос поставлен в очередь (позиция: {pending_tasks + 1}). "
                 f"Ожидайте...\n\n💡 Чтобы избежать ожидания, добавьте свой API-ключ GigaChat в настройках бота."
             )
         else:
@@ -154,14 +154,13 @@ async def goal_entered(message: Message, state: FSMContext, nko_repo, content_hi
     user_api_key = user_api.api_key if user_api and user_api.connected else None
 
     # Проверяем размер очереди перед генерацией
-    from utils.generation_queue import get_generation_queue
-    queue = get_generation_queue()
-    queue_size = queue._queue.qsize()
+    queue = get_generation_queue(user_api_key)
+    pending_tasks = queue.get_pending_tasks_count()
     
     # Показываем статус генерации ПЕРЕД началом генерации
-    if queue_size > 0:
+    if pending_tasks > 0:
         msg = await message.answer(
-            f"⏳ Ваш запрос поставлен в очередь (позиция: {queue_size + 1}). "
+            f"⏳ Ваш запрос поставлен в очередь (позиция: {pending_tasks + 1}). "
             f"Ожидайте...\n\n💡 Чтобы избежать ожидания, добавьте свой API-ключ GigaChat в настройках бота."
         )
     else:

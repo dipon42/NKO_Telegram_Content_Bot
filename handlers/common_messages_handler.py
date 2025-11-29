@@ -7,16 +7,66 @@ from aiogram.filters import Command, CommandStart
 
 import texts
 from keyboards import reply_kb,inline_kb
+from handlers.utils import should_show_access_button, build_user_main_keyboard
 
 
 msg_router = Router(name="Message router")
 logger = logging.getLogger(__name__)
 
+
+def _extract_start_payload(message: Message) -> str | None:
+    text = message.text or ""
+    parts = text.split(maxsplit=1)
+    if len(parts) == 2:
+        payload = parts[1].strip()
+        return payload or None
+    return None
+
+
+async def _activate_invite_link(code: str, message: Message, user, access_repo, user_repo):
+    link = await access_repo.get_by_code(code)
+    if not link:
+        await message.answer("❌ Приглашение не найдено или устарело.")
+        return user
+
+    if not link.is_active:
+        await message.answer("⚠️ Эта ссылка уже деактивирована.")
+        return user
+
+    if link.max_activations and link.activations_used >= link.max_activations:
+        await message.answer("⚠️ Лимит использований ссылки исчерпан.")
+        return user
+
+    if user.access:
+        await message.answer("У вас уже активирован доступ, дополнительная ссылка не требуется.")
+        return user
+
+    updated_user = await user_repo.set_access_and_role(
+        tg_id=user.tg_id,
+        access=True,
+        role=link.role,
+        invited_link_id=link.id,
+    )
+    await access_repo.register_activation(link)
+    await message.answer(texts.ACCESS_SUCCESS_TEXT, parse_mode="HTML", reply_markup=inline_kb.main_keyboard)
+    return updated_user
+
 @msg_router.message(CommandStart())
-async def start_cmd(message: Message, user_repo):
+async def start_cmd(message: Message, user_repo, access_repo):
     """Обработка команды start"""
-    await message.answer(texts.START_TEXT, reply_markup=inline_kb.main_keyboard, parse_mode="HTML")
-    await user_repo.create_user(message.from_user.id)
+    user = await user_repo.create_user(message.from_user.id)
+    payload = _extract_start_payload(message)
+    if payload:
+        user = await _activate_invite_link(payload, message, user, access_repo, user_repo)
+
+    if user.access:
+        await message.answer(
+            texts.START_TEXT,
+            reply_markup=reply_kb.build_main_keyboard(should_show_access_button(user)),
+            parse_mode="HTML"
+        )
+    else:
+        await message.answer(texts.ACCESS_REQUIRED_TEXT, parse_mode="HTML")
 
 @msg_router.message(Command("help"))
 async def help_cmd(message: Message):
@@ -24,16 +74,18 @@ async def help_cmd(message: Message):
     await message.answer(texts.HELP_TEXT, parse_mode="HTML")
 
 @msg_router.message(Command("отмена","cancel"))
-async def cancel_cmd(message: Message, state: FSMContext):
+async def cancel_cmd(message: Message, state: FSMContext, user_repo):
     """Обработка команды отмена"""
-    await message.answer("Ввод отменен",reply_markup=reply_kb.main_keyboard)
+    keyboard = await build_user_main_keyboard(user_repo, message.from_user.id)
+    await message.answer("Ввод отменен",reply_markup=keyboard)
     await state.clear()
 
 @msg_router.message(Command("menu","меню"))
-async def menu_cmd(message: Message):
+async def menu_cmd(message: Message, user_repo):
     """Обработка команды меню"""
+    keyboard = await build_user_main_keyboard(user_repo, message.from_user.id)
     await message.answer("Выберите действие из кнопок меню\n\n<b>Или напишите вашу идею и я сразу создам текст!</b>",
-                         reply_markup=reply_kb.main_keyboard)
+                         reply_markup=keyboard)
 
 @msg_router.message(F.text == "Информация об НКО")
 async def info_nko(message: Message, nko_repo):
@@ -66,8 +118,8 @@ async def info_nko(message: Message, nko_repo):
         info_text += "\nЧтобы обновить данные, нажмите «Редактировать данные»"
         
         await message.answer(info_text, reply_markup=inline_kb.nko_edit_info_keyboard)
-        return
-    await message.answer(texts.NKO_EMPTY,reply_markup=inline_kb.nko_add_info_keyboard)
+    else:
+        await message.answer(texts.NKO_EMPTY,reply_markup=inline_kb.nko_add_info_keyboard)
 
 @msg_router.message(Command("test_notifications", "тест_уведомления"))
 async def test_notifications_cmd(message: Message, notification_repo):

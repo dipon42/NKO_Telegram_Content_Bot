@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 
 from fsm import StructuredPostState
 from keyboards.inline_keyboards import get_regenerate_keyboard
+from utils.generation_queue import get_generation_queue
 
 
 structured_gen_router = Router(name="AI Structured Text Generation Router")
@@ -63,12 +64,29 @@ async def details_entered(message: Message, state: FSMContext, nko_repo,
     user_api = await ai_api_repo.get_user_api_key(message.from_user.id, "GigaChat")
     user_api_key = user_api.api_key if user_api and user_api.connected else None
 
+    # Информируем пользователя о статусе очереди
+    queue = get_generation_queue(user_api_key)
+    queue_load = queue.get_pending_tasks_count()
+    if queue_load > 0:
+        status_msg = await message.answer(
+            f"⏳ Ваш запрос поставлен в очередь (позиция: {queue_load + 1}). "
+            f"Ожидайте...\n\n💡 Чтобы избежать ожидания, добавьте свой API-ключ GigaChat в настройках бота."
+        )
+    else:
+        status_msg = await message.answer("📝 Генерирую пост... Пожалуйста, подождите🔄️")
+
     # Генерируем пост на основе структурированных данных
-    result = await gigachat_service.generate_structured_post(
-        event_info=event_info,
-        nko_data=nko_data,
-        user_api_key=user_api_key
-    )
+    try:
+        result = await gigachat_service.generate_structured_post(
+            event_info=event_info,
+            nko_data=nko_data,
+            user_api_key=user_api_key
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при генерации структурированного поста: {e}", exc_info=True)
+        await status_msg.edit_text("❌ Не удалось сгенерировать пост. Попробуйте позже.")
+        await state.clear()
+        return
 
     # Сохраняем в историю
     history_entry = await content_history_repo.add_content_history(
@@ -87,11 +105,11 @@ async def details_entered(message: Message, state: FSMContext, nko_repo,
 
     # Отправляем результат с кнопкой перегенерации
     try:
-        await message.answer(result, parse_mode="Markdown", reply_markup=regenerate_keyboard)
+        await status_msg.edit_text(result, parse_mode="Markdown", reply_markup=regenerate_keyboard)
     except:
         if result:
-            await message.answer(result, reply_markup=regenerate_keyboard)
+            await status_msg.edit_text(result, reply_markup=regenerate_keyboard)
         else:
-            await message.answer("Не удалось сгенерировать текст")
+            await status_msg.edit_text("Не удалось сгенерировать текст")
     
     await state.clear()

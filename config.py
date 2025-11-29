@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from typing import Tuple
 
 from dotenv import load_dotenv
 
@@ -11,6 +12,7 @@ class Config:
     DATABASE_URL: str
     ENCRYPTION_KEY: str
     GIGACHAT_CREDENTIALS: str
+    ADMIN_IDS: Tuple[int, ...]
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -28,6 +30,19 @@ class Config:
 
         database = os.getenv("DATABASE_URL","sqlite+aiosqlite:///./nko_bot.db")
 
-        return cls(BOT_TOKEN=token,DATABASE_URL=database,ENCRYPTION_KEY=encryption_key,GIGACHAT_CREDENTIALS=gigachat_credentials)
+        admins_env = os.getenv("ADMIN_IDS", "")
+        admin_ids: tuple[int, ...] = tuple(
+            int(tg_id.strip())
+            for tg_id in admins_env.split(",")
+            if tg_id.strip().isdigit()
+        )
+
+        return cls(
+            BOT_TOKEN=token,
+            DATABASE_URL=database,
+            ENCRYPTION_KEY=encryption_key,
+            GIGACHAT_CREDENTIALS=gigachat_credentials,
+            ADMIN_IDS=admin_ids,
+        )
 
 config = Config.from_env()

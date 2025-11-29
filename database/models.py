@@ -44,14 +44,29 @@ class UserModel(Base):
 
     tg_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     access: Mapped[bool] = mapped_column(Boolean, default=False)
+    role: Mapped[str] = mapped_column(String(32), default="guest")
+    invited_by_link_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("access_links.id"),
+        nullable=True
+    )
 
     # Связи
     nko_data: Mapped["NKODataModel"] = relationship("NKODataModel", back_populates="user", uselist=False)
     content_history: Mapped[list["ContentHistoryModel"]] = relationship("ContentHistoryModel", back_populates="user")
     api_keys: Mapped[list["AIAPIModel"]] = relationship("AIAPIModel", back_populates="user")
-    access_links: Mapped[list["AccessLinksModel"]] = relationship("AccessLinksModel", back_populates="creator")
+    access_links: Mapped[list["AccessLinksModel"]] = relationship(
+        "AccessLinksModel",
+        back_populates="creator",
+        foreign_keys="AccessLinksModel.created_by"
+    )
     content_plans: Mapped[list["ContentPlanModel"]] = relationship("ContentPlanModel", back_populates="user", uselist=False)
     notifications: Mapped[list["UserNotificationModel"]] = relationship("UserNotificationModel", back_populates="user")
+    invited_link: Mapped["AccessLinksModel"] = relationship(
+        "AccessLinksModel",
+        back_populates="activated_users",
+        foreign_keys=[invited_by_link_id]
+    )
 
 
 class AccessLinksModel(Base):
@@ -60,11 +75,25 @@ class AccessLinksModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     code: Mapped[str] = mapped_column(String, unique=True, default=lambda: str(uuid.uuid4()))
-    count_activate: Mapped[int] = mapped_column(Integer, default=99999)
+    max_activations: Mapped[int | None] = mapped_column("count_activate", Integer, default=1)
+    activations_used: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    role: Mapped[str] = mapped_column(String(32), default="nko")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.tg_id"))
 
     # Связь
-    creator: Mapped["UserModel"] = relationship("UserModel", back_populates="access_links")
+    creator: Mapped["UserModel"] = relationship(
+        "UserModel",
+        back_populates="access_links",
+        foreign_keys=[created_by]
+    )
+    activated_users: Mapped[list["UserModel"]] = relationship(
+        "UserModel",
+        back_populates="invited_link",
+        foreign_keys="UserModel.invited_by_link_id"
+    )
 
 
 class AIAPIModel(Base):

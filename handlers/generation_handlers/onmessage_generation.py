@@ -5,6 +5,7 @@ from aiogram.filters import StateFilter
 from aiogram.types import Message
 
 from keyboards.inline_keyboards import get_regenerate_keyboard
+from utils.generation_queue import get_generation_queue
 
 
 onmsg_router = Router()
@@ -30,14 +31,13 @@ async def handle_non_command_messages(message: Message, nko_repo,
     user_api_key = user_api.api_key if user_api and user_api.connected else None
 
     # Проверяем размер очереди перед генерацией
-    from utils.generation_queue import get_generation_queue
-    queue = get_generation_queue()
-    queue_size = queue._queue.qsize()
+    queue = get_generation_queue(user_api_key)
+    pending_tasks = queue.get_pending_tasks_count()
     
     # Создаем сообщение о статусе
-    if queue_size > 0:
+    if pending_tasks > 0:
         msg = await message.answer(
-            f"⏳ Ваш запрос поставлен в очередь (позиция: {queue_size + 1}). "
+            f"⏳ Ваш запрос поставлен в очередь (позиция: {pending_tasks + 1}). "
             f"Ожидайте...\n\n💡 Чтобы избежать ожидания, добавьте свой API-ключ GigaChat в настройках бота."
         )
     else:

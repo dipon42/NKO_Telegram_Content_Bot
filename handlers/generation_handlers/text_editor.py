@@ -6,6 +6,7 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
 from fsm import TextEditorState
+from utils.generation_queue import get_generation_queue
 
 
 editor_router = Router(name="AI Text Editor")
@@ -25,11 +26,35 @@ async def text_to_edit_entered(message: Message, state: FSMContext, content_hist
     user_api = await ai_api_repo.get_user_api_key(message.from_user.id, "GigaChat")
     user_api_key = user_api.api_key if user_api and user_api.connected else None
 
+    # Информируем пользователя о статусе очереди
+    queue = get_generation_queue(user_api_key)
+    queue_load = queue.get_pending_tasks_count()
+    if queue_load > 0:
+        status_msg = await message.answer(
+            f"⏳ Ваш запрос поставлен в очередь (позиция: {queue_load + 1}). "
+            f"Ожидайте...\n\n💡 Чтобы избежать ожидания, добавьте свой API-ключ GigaChat в настройках бота."
+        )
+    else:
+        status_msg = await message.answer("✏️ Редактирую текст... Пожалуйста, подождите🔄️")
+
+    # Callback для обновления сообщения при старте
+    async def update_message():
+        try:
+            await status_msg.edit_text("✏️ Редактирую текст... Пожалуйста, подождите🔄️")
+        except:
+            pass
+
     # Редактируем текст
-    result, _ = await gigachat_service.edit_text(
-        text=message.text,
-        user_api_key=user_api_key
-    )
+    try:
+        result, _ = await gigachat_service.edit_text(
+            text=message.text,
+            user_api_key=user_api_key,
+            on_start_callback=update_message
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при редактировании текста: {e}", exc_info=True)
+        await status_msg.edit_text("❌ Не удалось отредактировать текст. Попробуйте еще раз.")
+        return
 
     # Сохраняем в историю с дополнительными параметрами
     history_entry = await content_history_repo.add_content_history(
@@ -44,12 +69,12 @@ async def text_to_edit_entered(message: Message, state: FSMContext, content_hist
     )
 
     try:
-        await message.answer(result, parse_mode="Markdown")
+        await status_msg.edit_text(result, parse_mode="Markdown")
     except:
         if result:
-            await message.answer(result)
+            await status_msg.edit_text(result)
         else:
-            await message.answer("Не удалось отредактировать текст. Попробуйте еще раз.")
+            await status_msg.edit_text("Не удалось отредактировать текст. Попробуйте еще раз.")
     
     await state.clear()
 
@@ -68,14 +93,32 @@ async def handle_edit_command(message: Message, state: FSMContext, content_histo
     user_api = await ai_api_repo.get_user_api_key(message.from_user.id, "GigaChat")
     user_api_key = user_api.api_key if user_api and user_api.connected else None
 
+    # Информируем пользователя о статусе очереди
+    queue = get_generation_queue(user_api_key)
+    queue_load = queue.get_pending_tasks_count()
+    if queue_load > 0:
+        status_msg = await message.reply(
+            f"⏳ Ваш запрос поставлен в очередь (позиция: {queue_load + 1}). "
+            f"Ожидайте...\n\n💡 Чтобы избежать ожидания, добавьте свой API-ключ GigaChat в настройках бота."
+        )
+    else:
+        status_msg = await message.reply("✏️ Проверяю текст... Пожалуйста, подождите🔄️")
+
+    async def update_message():
+        try:
+            await status_msg.edit_text("✏️ Проверяю текст... Пожалуйста, подождите🔄️")
+        except:
+            pass
+
     # Редактируем текст
     try:
         result, _ = await gigachat_service.edit_text(
             text=original_text,
-            user_api_key=user_api_key
+            user_api_key=user_api_key,
+            on_start_callback=update_message
         )
     except Exception:
-        await message.answer("Не удалось отредактировать текст. Попробуйте еще раз.")
+        await status_msg.edit_text("❌ Не удалось отредактировать текст. Попробуйте еще раз.")
         return
 
     # Сохраняем в историю
@@ -92,6 +135,6 @@ async def handle_edit_command(message: Message, state: FSMContext, content_histo
 
     # Отправляем результат
     try:
-        await message.reply(result, parse_mode="Markdown")
+        await status_msg.edit_text(result, parse_mode="Markdown")
     except:
-        await message.reply(result)
+        await status_msg.edit_text(result)

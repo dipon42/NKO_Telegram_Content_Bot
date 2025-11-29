@@ -116,3 +116,28 @@ def get_daily_post_keyboard() -> InlineKeyboardMarkup:
             )]
         ]
     )
+
+access_admin_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="Создать одноразовую ссылку", callback_data="access_admin_create")],
+    [InlineKeyboardButton(text="Мои ссылки", callback_data="access_admin_list")],
+    [InlineKeyboardButton(text="Все активные ссылки", callback_data="access_admin_list_all")],
+])
+
+access_nko_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="Создать ссылку", callback_data="access_nko_create")],
+    [InlineKeyboardButton(text="Мои ссылки", callback_data="access_nko_list")],
+])
+
+
+def access_link_inline_keyboard(link_id: int, is_active: bool) -> InlineKeyboardMarkup:
+    """Клавиатура управления конкретной ссылкой"""
+    action = "off" if is_active else "on"
+    text = "Деактивировать" if is_active else "Активировать"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(
+                text=text,
+                callback_data=f"access_toggle:{link_id}:{action}"
+            )]
+        ]
+    )

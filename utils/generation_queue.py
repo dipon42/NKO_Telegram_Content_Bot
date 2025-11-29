@@ -1,8 +1,11 @@
 import asyncio
+import hashlib
 import logging
-from typing import Callable, Any, Awaitable, Optional
+from typing import Callable, Any, Awaitable, Optional, Dict
 from dataclasses import dataclass, field
 from enum import Enum
+
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +91,10 @@ class GenerationQueue:
         # Future создается в __post_init__
         future = task.future
         
-        queue_size = self._queue.qsize()
+        if not self._is_running:
+            await self.start()
+
+        queue_size = self.get_pending_tasks_count()
         position = queue_size + 1
         await self._queue.put(task)
         logger.info(
@@ -198,22 +204,66 @@ class GenerationQueue:
                 raise
     
     def get_queue_size(self) -> int:
-        """Получить размер очереди"""
+        """Получить количество задач, ожидающих в очереди (без учёта текущей обработки)"""
         return self._queue.qsize()
+    
+    def get_pending_tasks_count(self) -> int:
+        """
+        Получить количество задач, которые пользователь должен дождаться.
+        Включает текущую выполняемую задачу (если есть) и все ожидающие в очереди.
+        """
+        pending = self._queue.qsize()
+        if self._current_task is not None:
+            pending += 1
+        return pending
     
     def get_current_task(self) -> Optional[GenerationTask]:
         """Получить текущую выполняемую задачу"""
         return self._current_task
 
 
-# Глобальный экземпляр очереди
-_global_queue: Optional[GenerationQueue] = None
+DEFAULT_QUEUE_KEY = "__default_queue__"
 
 
-def get_generation_queue() -> GenerationQueue:
-    """Получить глобальный экземпляр очереди генерации"""
-    global _global_queue
-    if _global_queue is None:
-        _global_queue = GenerationQueue()
-    return _global_queue
+class GenerationQueueManager:
+    """Менеджер, который хранит отдельные очереди для каждого API-ключа."""
+
+    def __init__(self):
+        self._queues: Dict[str, GenerationQueue] = {}
+
+    @staticmethod
+    def _normalize_key(queue_key: Optional[str]) -> str:
+        """
+        Приводим ключ к единому виду, чтобы все обращения к одной и той же
+        учётке API (в том числе к ключу по умолчанию) попадали в одну очередь.
+        """
+        resolved_key = queue_key
+        if not resolved_key:
+            # Для дефолтного ключа используем фактические креды из конфигурации.
+            # Это гарантирует, что сообщения и сами задачи будут смотреть в одну очередь.
+            resolved_key = config.GIGACHAT_CREDENTIALS or DEFAULT_QUEUE_KEY
+        return hashlib.sha256(resolved_key.encode("utf-8")).hexdigest()
+
+    def get_queue(self, queue_key: Optional[str] = None) -> GenerationQueue:
+        normalized_key = self._normalize_key(queue_key)
+        if normalized_key not in self._queues:
+            self._queues[normalized_key] = GenerationQueue()
+        return self._queues[normalized_key]
+
+    async def stop_all(self):
+        for queue in self._queues.values():
+            await queue.stop()
+
+
+_queue_manager = GenerationQueueManager()
+
+
+def get_generation_queue(queue_key: Optional[str] = None) -> GenerationQueue:
+    """Получить очередь генерации для конкретного API-ключа."""
+    return _queue_manager.get_queue(queue_key)
+
+
+async def stop_all_generation_queues():
+    """Остановить все активные очереди генерации."""
+    await _queue_manager.stop_all()
 

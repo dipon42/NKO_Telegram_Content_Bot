@@ -48,13 +48,13 @@ async def create_image_from_text(message: Message, ai_api_repo: AIAPIRepository,
     user_api_key = user_api.api_key if user_api and user_api.connected else None
     
     # Проверяем размер очереди перед генерацией
-    queue = get_generation_queue()
-    queue_size = queue._queue.qsize()
+    queue = get_generation_queue(user_api_key)
+    pending_tasks = queue.get_pending_tasks_count()
     
     # Отправляем сообщение о начале генерации
-    if queue_size > 0:
+    if pending_tasks > 0:
         msg = await message.answer(
-            f"⏳ Ваш запрос поставлен в очередь (позиция: {queue_size + 1}). "
+            f"⏳ Ваш запрос поставлен в очередь (позиция: {pending_tasks + 1}). "
             f"Ожидайте...\n\n💡 Чтобы избежать ожидания, добавьте свой API-ключ GigaChat в настройках бота."
         )
     else:
@@ -72,15 +72,18 @@ async def create_image_from_text(message: Message, ai_api_repo: AIAPIRepository,
         enhanced_prompt, _ = await gigachat_service.enhance_image_prompt(
             user_prompt=f"Создай изображение для поста в соцсетях на тему: {post_text}",
             user_api_key=user_api_key,
-            on_start_callback=update_message if queue_size == 0 else None
+            on_start_callback=update_message if pending_tasks == 0 else None
         )
-        
+        await msg.edit_text("Улучшаю промпт...")
+        await asyncio.sleep(3)
+        await msg.edit_text(" Создаю изображение для поста... Это может занять до 30 секунд. Подождите, пожалуйста... ⏳")
+
         # Генерируем изображение с улучшенным промптом (используем стиль по умолчанию - реализм)
         success, image_url, position = await gigachat_service.generate_image(
             prompt=enhanced_prompt,
             style="реализм",
             credentials=user_api_key,
-            on_start_callback=update_message if queue_size > 0 else None
+            on_start_callback=update_message if pending_tasks > 0 else None
         )
         
         if success and image_url:
@@ -173,13 +176,13 @@ async def edit_text_with_wishes(message: Message, ai_api_repo: AIAPIRepository,
     user_api_key = user_api.api_key if user_api and user_api.connected else None
     
     # Проверяем размер очереди перед генерацией
-    queue = get_generation_queue()
-    queue_size = queue._queue.qsize()
+    queue = get_generation_queue(user_api_key)
+    pending_tasks = queue.get_pending_tasks_count()
     
     # Отправляем сообщение о начале редактирования
-    if queue_size > 0:
+    if pending_tasks > 0:
         msg = await message.answer(
-            f"⏳ Ваш запрос поставлен в очередь (позиция: {queue_size + 1}). "
+            f"⏳ Ваш запрос поставлен в очередь (позиция: {pending_tasks + 1}). "
             f"Ожидайте...\n\n💡 Чтобы избежать ожидания, добавьте свой API-ключ GigaChat в настройках бота."
         )
     else:

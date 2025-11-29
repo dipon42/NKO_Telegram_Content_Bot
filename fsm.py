@@ -43,3 +43,7 @@ class AddAPIkeyState(StatesGroup):
 class APIKeyState(StatesGroup):
     entering_api_key = State()
     confirming_replacement = State()
+
+
+class AccessLinkState(StatesGroup):
+    entering_multiuse_limit = State()

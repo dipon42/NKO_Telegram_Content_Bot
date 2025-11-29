@@ -9,6 +9,7 @@ from aiogram.fsm.context import FSMContext
 from keyboards.inline_keyboards import get_regenerate_keyboard, image_style_keyboard, image_prompt_enhancement_keyboard
 from fsm import ImageGenerationState
 from texts import IMAGE_PROMPT_ENHANCEMENT
+from utils.generation_queue import get_generation_queue
 
 
 image_gen_router = Router(name="API image generation")
@@ -81,8 +82,15 @@ async def prompt_enhance_selected(cb: CallbackQuery, state: FSMContext, ai_api_r
     # Сохраняем улучшенный промт
     await state.update_data(final_prompt=enhanced_prompt)
     
-    # Редактируем сообщение с результатом
-    await msg.edit_text(f"✅ Промт успешно улучшен!\n\nОригинальный промт:\n`{description}`\n\nУлучшенный промт:\n`{enhanced_prompt}`\n\nТеперь выберите стиль для генерации изображения:", reply_markup=image_style_keyboard)
+    # Редактируем сообщение с результатом и предупреждением о длительной генерации
+    await msg.edit_text(
+        "✅ Промт успешно улучшен!\n\n"
+        f"Оригинальный промт:\n`{description}`\n\n"
+        f"Улучшенный промт:\n`{enhanced_prompt}`\n\n"
+        "⚠️ После улучшения промта генерация изображения может занимать немного больше времени.\n\n"
+        "Теперь выберите стиль для генерации изображения:",
+        reply_markup=image_style_keyboard
+    )
     
     # Переходим к выбору стиля
     await state.set_state(ImageGenerationState.style_selection)
@@ -105,14 +113,13 @@ async def style_selected(cb: CallbackQuery, state: FSMContext, ai_api_repo, giga
     user_api_key = user_api.api_key if user_api and user_api.connected else None
 
     # Проверяем размер очереди перед генерацией
-    from utils.generation_queue import get_generation_queue
-    queue = get_generation_queue()
-    queue_size = queue._queue.qsize()
+    queue = get_generation_queue(user_api_key)
+    pending_tasks = queue.get_pending_tasks_count()
     
     # Отправляем сообщение о начале генерации
-    if queue_size > 0:
+    if pending_tasks > 0:
         msg = await cb.message.answer(
-            f"⏳ Ваш запрос поставлен в очередь (позиция: {queue_size + 1}). "
+            f"⏳ Ваш запрос поставлен в очередь (позиция: {pending_tasks + 1}). "
             f"Ожидайте...\n\n💡 Чтобы избежать ожидания, добавьте свой API-ключ GigaChat в настройках бота."
         )
     else:
@@ -215,3 +222,6 @@ async def style_selected(cb: CallbackQuery, state: FSMContext, ai_api_repo, giga
                 os.remove(image_url)
             except Exception as e:
                 logger.warning(f"Не удалось удалить временный файл {image_url}: {e}")
+
+        # Сбрасываем состояние, чтобы пользователь мог начать новый сценарий
+        await state.clear()

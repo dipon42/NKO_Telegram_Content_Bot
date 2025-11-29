@@ -9,12 +9,12 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from config import config
 from database import db_manager
 from database.repositories import NotificationRepository
-from handlers import msg_router, cb_router, settings_router, fsm_router, errors_router, history_router
+from handlers import msg_router, cb_router, settings_router, fsm_router, errors_router, history_router, access_router
 from handlers.generation_handlers import (text_gen_router, image_gen_router, cp_router,
                                           editor_router, structured_gen_router, examples_gen_router, onmsg_router, reply_commands_router)
 from middleware.di_middleware import InjectionMiddleware
 from handlers.scheduled_notifications import ScheduledNotifications
-from utils.generation_queue import get_generation_queue
+from utils.generation_queue import get_generation_queue, stop_all_generation_queues
 
 
 # Настройка логирования
@@ -41,7 +41,7 @@ async def main():
     scheduler = ScheduledNotifications(notification_repo)
     
     # Подключаем роутеры
-    dp.include_routers(msg_router, settings_router, fsm_router, cb_router, text_gen_router, image_gen_router,
+    dp.include_routers(msg_router, settings_router, access_router, fsm_router, cb_router, text_gen_router, image_gen_router,
                        cp_router, editor_router, structured_gen_router, examples_gen_router,
                        errors_router, history_router, onmsg_router, reply_commands_router)
 
@@ -77,8 +77,7 @@ async def main():
         await scheduler.stop()
         
         # Останавливаем очередь генерации
-        generation_queue = get_generation_queue()
-        await generation_queue.stop()
+        await stop_all_generation_queues()
         
         await bot.session.close()
         await db_manager.close()

@@ -7,6 +7,7 @@ from aiogram.fsm.context import FSMContext
 import texts
 from fsm import AddInfoNkoStateGroup
 from keyboards import reply_kb
+from handlers.utils import build_user_main_keyboard
 
 fsm_router = Router(name="NKO add info router")
 
@@ -91,7 +92,7 @@ async def add_forms_of_activity_nko(message: Message, state: FSMContext):
     await state.set_state(AddInfoNkoStateGroup.organization_size)
 
 @fsm_router.message(AddInfoNkoStateGroup.organization_size)
-async def add_organization_size_nko(message: Message, state: FSMContext, nko_repo):
+async def add_organization_size_nko(message: Message, state: FSMContext, nko_repo, user_repo):
     """Обработчик ввода размера организации"""
     if message.text.strip().lower() == "пропустить":
         await state.update_data(organization_size=None)
@@ -113,5 +114,6 @@ async def add_organization_size_nko(message: Message, state: FSMContext, nko_rep
     await nko_repo.save_nko_data(message.from_user.id, data)
     await message.answer("Информация о НКО успешно сохранена и будет использоваться при создании контента! 🎉")
     await  asyncio.sleep(1.25)
-    await message.answer(texts.START_TEXT, reply_markup=reply_kb.main_keyboard, parse_mode="HTML")
+    keyboard = await build_user_main_keyboard(user_repo, message.from_user.id)
+    await message.answer(texts.START_TEXT, reply_markup=keyboard, parse_mode="HTML")
     await state.clear()

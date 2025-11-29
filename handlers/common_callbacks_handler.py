@@ -8,8 +8,10 @@ from aiogram.types import CallbackQuery, FSInputFile
 import texts
 from fsm import ContentPlanState
 from keyboards import reply_kb
+from handlers.utils import build_user_main_keyboard
 from keyboards.inline_keyboards import get_regenerate_keyboard, get_accept_plan_keyboard, get_unaccept_plan_keyboard, get_daily_post_keyboard
 from ai_service.gigachat_ai_service import get_gigachat_service
+from utils.generation_queue import get_generation_queue
 
 
 gigachat_service = get_gigachat_service()
@@ -18,10 +20,11 @@ cb_router = Router(name="CallBack router")
 logger = logging.getLogger(__name__)
 
 @cb_router.callback_query(F.data=="pass_add_info")
-async def pass_add_info(cb: CallbackQuery):
+async def pass_add_info(cb: CallbackQuery, user_repo):
     """Обработка callback пропуска заполнения"""
     await cb.message.edit_reply_markup(reply_markup=None)
-    await cb.message.answer(texts.START_TEXT, reply_markup=reply_kb.main_keyboard, parse_mode="HTML")
+    keyboard = await build_user_main_keyboard(user_repo, cb.from_user.id)
+    await cb.message.answer(texts.START_TEXT, reply_markup=keyboard, parse_mode="HTML")
     await cb.answer()
 
 @cb_router.callback_query(F.data=="api_instruction")
@@ -30,7 +33,7 @@ async def api_instruction(cb: CallbackQuery):
     await cb.answer()
 
 @cb_router.callback_query(F.data.startswith("regenerate_"))
-async def regenerate_content(cb: CallbackQuery, nko_repo, content_history_repo, ai_api_repo):
+async def regenerate_content(cb: CallbackQuery, nko_repo, content_history_repo, ai_api_repo, user_repo):
     """Пересоздание контента"""
     try:
 
@@ -38,10 +41,24 @@ async def regenerate_content(cb: CallbackQuery, nko_repo, content_history_repo, 
 
         # Удаляем клавиатуру и показываем индикатор
         await cb.message.edit_reply_markup(reply_markup=None)
+
+        user_api = await ai_api_repo.get_user_api_key(cb.from_user.id, "GigaChat")
+        user_api_key = user_api.api_key if user_api and user_api.connected else None
+
+        queue = get_generation_queue(user_api_key)
+        pending_tasks = queue.get_pending_tasks_count()
+        if pending_tasks > 0:
+            queue_message = (
+                f"⏳ Ваш запрос поставлен в очередь (позиция: {pending_tasks + 1}). "
+                f"Ожидайте...\n\n💡 Чтобы избежать ожидания, добавьте свой API-ключ GigaChat в настройках бота."
+            )
+        else:
+            queue_message = "🔄 Пересоздаю контент, ожидайте..."
+        
         if cb.message.text:
-            await cb.message.edit_text("🔄 Пересоздаю контент, ожидайте...")
+            await cb.message.edit_text(queue_message)
         elif cb.message.caption:
-            await cb.message.edit_caption(caption="🔄 Пересоздаю контент, ожидайте...", reply_markup=None)
+            await cb.message.edit_caption(caption=queue_message, reply_markup=None)
 
         # Извлекаем ID записи
         history_id = int(cb.data.split("_")[1])
@@ -52,10 +69,8 @@ async def regenerate_content(cb: CallbackQuery, nko_repo, content_history_repo, 
             await cb.message.edit_text("❌ Запись не найдена или доступ запрещён.")
             return
 
-        # Получаем данные НКО и API-ключ
+        # Получаем данные НКО
         nko_data = await nko_repo.get_nko_data(cb.from_user.id)
-        user_api = await ai_api_repo.get_user_api_key(cb.from_user.id, "GigaChat")
-        user_api_key = user_api.api_key if user_api and user_api.connected else None
 
         content_type = history_entry.content_type
         new_result = None
@@ -99,10 +114,16 @@ async def regenerate_content(cb: CallbackQuery, nko_repo, content_history_repo, 
             # Удаляем старое сообщение с изображением
             await cb.message.delete()
 
-            # Отправляем уведомление о генерации
-            wait_msg = await cb.message.answer(
-                "🎨 Создаю изображение... Это может занять до 30 секунд. Подождите, пожалуйста... ⏳"
-            )
+            # Отправляем уведомление о генерации/очереди
+            if pending_tasks > 0:
+                wait_msg = await cb.message.answer(
+                    f"⏳ Ваш запрос поставлен в очередь (позиция: {pending_tasks + 1}). "
+                    f"Ожидайте...\n\n💡 Чтобы избежать ожидания, добавьте свой API-ключ GigaChat в настройках бота."
+                )
+            else:
+                wait_msg = await cb.message.answer(
+                    "🎨 Создаю изображение... Это может занять до 30 секунд. Подождите, пожалуйста... ⏳"
+                )
 
             # Используем промпт из истории (там уже сохранен финальный промпт - улучшенный или оригинальный)
             prompt_to_use = history_entry.prompt
@@ -210,7 +231,6 @@ async def regenerate_content(cb: CallbackQuery, nko_repo, content_history_repo, 
             # Если перегенерация не удалась, НЕ удаляем запись - она может быть полезна для отладки
             # await content_history_repo.db_session.delete(new_history_entry)
             # await content_history_repo.db_session.commit()
-            
             await cb.message.edit_text(
                 "❌ Не удалось пересоздать контент. Попробуйте позже.",
                 reply_markup=regenerate_button
@@ -220,13 +240,22 @@ async def regenerate_content(cb: CallbackQuery, nko_repo, content_history_repo, 
         await cb.message.edit_text("⚠️ Некорректный идентификатор записи.")
     except Exception as e:
         logger.error(f"Ошибка при пересоздании контента: {e}")
-        await cb.message.edit_text(
+        keyboard = await build_user_main_keyboard(user_repo, cb.from_user.id)
+        try:
+            await cb.message.edit_text(
+                "❌ Произошла ошибка при пересоздании контента. Попробуйте позже.",
+                reply_markup=None
+            )
+        except Exception:
+            # Если сообщение нельзя отредактировать (например, уже удалено), просто отправим новое
+            pass
+        await cb.message.answer(
             "❌ Произошла ошибка при пересоздании контента. Попробуйте позже.",
-            reply_markup=reply_kb.main_keyboard
+            reply_markup=keyboard
         )
 
 @cb_router.callback_query(F.data == "accept_content_plan")
-async def accept_content_plan(cb: CallbackQuery, content_plan_repo, notification_repo):
+async def accept_content_plan(cb: CallbackQuery, content_plan_repo, notification_repo, user_repo):
     """Обработка принятия контент-плана"""
     try:
         await cb.answer()
@@ -264,21 +293,30 @@ async def accept_content_plan(cb: CallbackQuery, content_plan_repo, notification
         )
         
         # Отправляем сообщение об успешном принятии
+        keyboard = await build_user_main_keyboard(user_repo, cb.from_user.id)
         await cb.message.answer(
             "✅ Контент-план принят!",
-            reply_markup=reply_kb.main_keyboard
+            reply_markup=keyboard
         )
         
     except Exception as e:
         logger.error(f"Ошибка при принятии контент-плана: {e}")
-        await cb.message.edit_text(
+        keyboard = await build_user_main_keyboard(user_repo, cb.from_user.id)
+        try:
+            await cb.message.edit_text(
+                "❌ Произошла ошибка при принятии контент-плана. Попробуйте позже.",
+                reply_markup=None
+            )
+        except Exception:
+            pass
+        await cb.message.answer(
             "❌ Произошла ошибка при принятии контент-плана. Попробуйте позже.",
-            reply_markup=reply_kb.main_keyboard
+            reply_markup=keyboard
         )
 
 
 @cb_router.callback_query(F.data == "unaccept_content_plan")
-async def unaccept_content_plan(cb: CallbackQuery, content_plan_repo, notification_repo, content_history_repo):
+async def unaccept_content_plan(cb: CallbackQuery, content_plan_repo, notification_repo, content_history_repo, user_repo):
     """Обработка отмены принятия контент-плана"""
     try:
         await cb.answer()
@@ -326,16 +364,25 @@ async def unaccept_content_plan(cb: CallbackQuery, content_plan_repo, notificati
                 reply_markup=keyboard
             )
         
+        keyboard = await build_user_main_keyboard(user_repo, cb.from_user.id)
         await cb.message.answer(
             "❌ Контент-план отменён.",
-            reply_markup=reply_kb.main_keyboard
+            reply_markup=keyboard
         )
         
     except Exception as e:
         logger.error(f"Ошибка при отмене принятия контент-плана: {e}")
-        await cb.message.edit_text(
+        keyboard = await build_user_main_keyboard(user_repo, cb.from_user.id)
+        try:
+            await cb.message.edit_text(
+                "❌ Произошла ошибка при отмене принятия контент-плана. Попробуйте позже.",
+                reply_markup=None
+            )
+        except Exception:
+            pass
+        await cb.message.answer(
             "❌ Произошла ошибка при отмене принятия контент-плана. Попробуйте позже.",
-            reply_markup=reply_kb.main_keyboard
+            reply_markup=keyboard
         )
 
 
@@ -379,14 +426,13 @@ async def generate_daily_post(cb: CallbackQuery, nko_repo, content_history_repo,
         user_api_key = user_api.api_key if user_api and user_api.connected else None
         
         # Проверяем размер очереди перед генерацией
-        from utils.generation_queue import get_generation_queue
-        queue = get_generation_queue()
-        queue_size = queue._queue.qsize()
+        queue = get_generation_queue(user_api_key)
+        pending_tasks = queue.get_pending_tasks_count()
         
         # Отправляем сообщение о начале генерации
-        if queue_size > 0:
+        if pending_tasks > 0:
             msg = await cb.message.answer(
-                f"⏳ Ваш запрос поставлен в очередь (позиция: {queue_size + 1}). "
+                f"⏳ Ваш запрос поставлен в очередь (позиция: {pending_tasks + 1}). "
                 f"Ожидайте...\n\n💡 Чтобы избежать ожидания, добавьте свой API-ключ GigaChat в настройках бота."
             )
         else:

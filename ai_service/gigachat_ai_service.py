@@ -69,7 +69,7 @@ class GigaChatService:
                 raise
         
         # Добавляем задачу в очередь
-        queue = get_generation_queue()
+        queue = get_generation_queue(used_credentials)
         result, position = await queue.add_task(GenerationType.TEXT, _generate_internal, on_start_callback=on_start_callback)
         return result, position
 
@@ -644,7 +644,7 @@ class GigaChatService:
             async with GigaChat(
                     credentials=used_credentials,
                     verify_ssl_certs=False,
-                    timeout=120.0,  # Увеличено с 80 до 120 секунд для генерации изображений
+                    timeout=40.0,  
             ) as giga:
 
                 generate_prompt = f"Нарисуй изображение подходящее под текст '{prompt_value}' в стиле '{style_value}'"
@@ -653,7 +653,7 @@ class GigaChatService:
                 payload = Chat(
                     messages=[Messages(role=MessagesRole.USER, content=generate_prompt)],
                     temperature=0.7,
-                    max_tokens=200,
+                    max_tokens=500,
                     function_call="auto",
                 )
 
@@ -682,7 +682,7 @@ class GigaChatService:
         
         # Добавляем задачу в очередь
         try:
-            queue = get_generation_queue()
+            queue = get_generation_queue(used_credentials)
             result, position = await queue.add_task(GenerationType.IMAGE, _generate_image_internal, on_start_callback=on_start_callback)
             return result[0], result[1], position
         except Exception as e:

@@ -7,6 +7,7 @@ from aiogram.filters import StateFilter
 
 from fsm import TextFromExamplesState
 from keyboards.inline_keyboards import get_regenerate_keyboard
+from utils.generation_queue import get_generation_queue
 
 
 examples_gen_router = Router(name="AI Examples Generation")
@@ -75,13 +76,30 @@ async def new_idea_entered(message: Message, state: FSMContext, nko_repo,
     user_api = await ai_api_repo.get_user_api_key(message.from_user.id, "GigaChat")
     user_api_key = user_api.api_key if user_api and user_api.connected else None
 
+    # Информируем пользователя о статусе очереди
+    queue = get_generation_queue(user_api_key)
+    queue_load = queue.get_pending_tasks_count()
+    if queue_load > 0:
+        status_msg = await message.answer(
+            f"⏳ Ваш запрос поставлен в очередь (позиция: {queue_load + 1}). "
+            f"Ожидайте...\n\n💡 Чтобы избежать ожидания, добавьте свой API-ключ GigaChat в настройках бота."
+        )
+    else:
+        status_msg = await message.answer("✨ Генерирую пост по вашим примерам... Пожалуйста, подождите🔄️")
+
     # Генерируем пост по аналогии с примерами
-    result = await gigachat_service.generate_text_from_examples(
-        example_posts=data["examples"],
-        new_idea=data["new_idea"],
-        user_api_key=user_api_key,
-        nko_data=nko_data
-    )
+    try:
+        result = await gigachat_service.generate_text_from_examples(
+            example_posts=data["examples"],
+            new_idea=data["new_idea"],
+            user_api_key=user_api_key,
+            nko_data=nko_data
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при генерации текста по примерам: {e}", exc_info=True)
+        await status_msg.edit_text("❌ Не удалось сгенерировать текст. Попробуйте позже.")
+        await state.clear()
+        return
 
     # Сохраняем в историю
     history_entry = await content_history_repo.add_content_history(
@@ -101,11 +119,11 @@ async def new_idea_entered(message: Message, state: FSMContext, nko_repo,
 
     # Отправляем результат с кнопкой перегенерации
     try:
-        await message.answer(result, parse_mode="Markdown", reply_markup=regenerate_keyboard)
+        await status_msg.edit_text(result, parse_mode="Markdown", reply_markup=regenerate_keyboard)
     except:
         if result:
-            await message.answer(result, reply_markup=regenerate_keyboard)
+            await status_msg.edit_text(result, reply_markup=regenerate_keyboard)
         else:
-            await message.answer("Не удалось сгенерировать текст")
+            await status_msg.edit_text("Не удалось сгенерировать текст")
     
     await state.clear()
